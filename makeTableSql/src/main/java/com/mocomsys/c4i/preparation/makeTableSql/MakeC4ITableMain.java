@@ -1,6 +1,10 @@
 package com.mocomsys.c4i.preparation.makeTableSql;
 
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,11 +19,12 @@ import junit.framework.TestCase;
 import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 import org.apache.poi.ss.usermodel.CellType;
 
-public class MakeC4ITableMain{
+public class MakeC4ITableMain {
 
 	private POIFSFileSystem fs = null;
 	private XSSFWorkbook workbook = null;
 	private String excelFile = System.getProperty("excelFilePath");
+	private String sqlFilePath = null;
 
 	private int MIAdapterDataSheetNum = -1;
 	private int interfaceDataSheetNum = -1;
@@ -36,8 +41,8 @@ public class MakeC4ITableMain{
 		prepareExcelData();
 		makeTableSql(workbook, MIAdapterDataSheetNum);
 		makeTableSql(workbook, interfaceDataSheetNum);
-		// makeTableSql(workbook, moniteringDataSheetNum);
-		// makeTableSql(workbook, convertModuleDataSheetNum);
+		makeTableSql(workbook, moniteringDataSheetNum);
+		makeTableSql(workbook, convertModuleDataSheetNum);
 	}
 
 	public void prepareExcelData() {
@@ -127,7 +132,8 @@ public class MakeC4ITableMain{
 
 				Map<String, ColumnInfo> mColumnInfo = new LinkedHashMap<String, ColumnInfo>();
 
-				while (sheet.getRow(columnNum).getCell(0) != null) {
+				while (sheet.getRow(columnNum) != null && sheet.getRow(columnNum).getCell(0) != null
+						&& sheet.getRow(columnNum).getCell(0).getNumericCellValue() != 0) {
 					mColumnInfo = getColumnInfo(sheet, columnNum, mColumnInfo);
 					columnNum++;
 				}
@@ -136,15 +142,14 @@ public class MakeC4ITableMain{
 
 				// ----tableInfo로 sql 만들 부분
 				makeSqlFile(tableInfo);
-				
-				
-			} catch (NullPointerException e) {
 
+			} catch (NullPointerException e) {
+				e.printStackTrace();
 			}
 
 			// logger.info(tableInfo.toString());
 
-		}	
+		}
 
 	}
 
@@ -195,6 +200,11 @@ public class MakeC4ITableMain{
 
 	public void makeSqlFile(TableInfo tableInfo) {
 
+		FileWriter fw = null;
+		PrintWriter pw = null;
+		File file = null;
+		sqlFilePath = System.getProperty("sqlFilePath");
+
 		List<String> PKList = new ArrayList<String>();
 
 		String createSqlStatement = "DROP TABLE " + tableInfo.getTableId() + "\n/\n\nCREATE TABLE "
@@ -204,26 +214,27 @@ public class MakeC4ITableMain{
 			ColumnInfo columnInfo = entry.getValue();
 			createSqlStatement += "\t" + columnInfo.getColumnId();
 
+			if (columnInfo.getDataType() != null && columnInfo.getDataType().equalsIgnoreCase("DATE")) {
+				createSqlStatement += "\t" + columnInfo.getDataType();
+			} else if(columnInfo.getDataType() != null && columnInfo.getDataType().equalsIgnoreCase("NUMBER") && columnInfo.getLength() == 0){
+				createSqlStatement += "\t" + columnInfo.getDataType();
+			} else {
+				createSqlStatement += "\t" + columnInfo.getDataType() + "(" + columnInfo.getLength() + ")";
+			}
 
-				if (columnInfo.getDataType()!=null && columnInfo.getDataType().equalsIgnoreCase("DATE")) {
-					createSqlStatement += "\t" + columnInfo.getDataType();
-				} else {
-					createSqlStatement += "\t" + columnInfo.getDataType() + "(" + columnInfo.getLength() + ")";
-				}
+			if (columnInfo.getDefaultData() != null) {
+				createSqlStatement += "\tDEFAULT " + columnInfo.getDefaultData();
+			}
 
-				if (columnInfo.getDefaultData() != null) {
-					createSqlStatement += "\tDEFAULT " + columnInfo.getDefaultData();
-				}
+			if (columnInfo.getNullChk() != null && columnInfo.getNullChk().equalsIgnoreCase("N")) {
+				createSqlStatement += "\tNOT NULL";
+			}
 
-				if (columnInfo.getNullChk() != null && columnInfo.getNullChk().equalsIgnoreCase("N")) {
-					createSqlStatement += "\tNOT NULL";
-				}
+			createSqlStatement += ",\n";
 
-				createSqlStatement += ",\n";
-
-				if (columnInfo.getPK() != null && columnInfo.getPK().equalsIgnoreCase("Y")) {
-					PKList.add(columnInfo.getColumnId());
-				}
+			if (columnInfo.getPK() != null && columnInfo.getPK().equalsIgnoreCase("Y")) {
+				PKList.add(columnInfo.getColumnId());
+			}
 
 		}
 
@@ -243,9 +254,39 @@ public class MakeC4ITableMain{
 			break;
 		}
 
-		createSqlStatement += ")";
+		createSqlStatement += ")\n/\n";
+		
+		for(Map.Entry<String, ColumnInfo> entry : tableInfo.getmColumnInfo().entrySet()){
+			String columnComment = "COMMENT ON COLUMN " + tableInfo.getTableId()+"." + entry.getValue().getColumnId() +" IS '"+entry.getValue().getColumnName()+"';\n"; 
+			createSqlStatement += columnComment;
+		}
+		
+		createSqlStatement += "COMMIT;";		
 
 		System.out.println(createSqlStatement);
+
+		try {
+			
+			String sqlFile = sqlFilePath + "/";
+
+			if(createSqlStatement.indexOf("(0),") != -1){
+				sqlFile = sqlFile + "(Chk)";
+			}
+			
+			file = new File(sqlFile + tableInfo.getTableId() + ".sql");
+			
+			if(file.exists()){
+				file = new File(sqlFile + tableInfo.getTableId() + "_"+tableInfo.getTableName()+ ".sql");
+			}
+						
+			fw = new FileWriter(file, false);
+			pw = new PrintWriter(fw, true);
+
+			pw.println(createSqlStatement);
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 
 	}
 
